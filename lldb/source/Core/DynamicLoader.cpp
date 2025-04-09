@@ -243,14 +243,32 @@ ModuleSP DynamicLoader::LoadBinaryWithUUIDAndAddress(
     // find an executable and symbol file.
     if (!module_sp) {
       FileSpecList search_paths = Target::GetDefaultDebugFileSearchPaths();
-      module_spec.GetSymbolFileSpec() =
-          PluginManager::LocateExecutableSymbolFile(module_spec, search_paths);
-      ModuleSpec objfile_module_spec =
-          PluginManager::LocateExecutableObjectFile(module_spec);
+      StatsDuration symbol_duration;
+      std::string symbol_locator_name;
+      StatsDuration object_duration;
+      std::string object_locator_name;
+      ModuleSpec objfile_module_spec;
+      {
+        ElapsedTime elapsed(symbol_duration);
+        module_spec.GetSymbolFileSpec() =
+            PluginManager::LocateExecutableSymbolFile(module_spec, search_paths,
+                                                      &symbol_locator_name);
+      }
+      {
+        ElapsedTime elapsed(object_duration);
+        objfile_module_spec = PluginManager::LocateExecutableObjectFile(
+            module_spec, &object_locator_name);
+      }
       module_spec.GetFileSpec() = objfile_module_spec.GetFileSpec();
       if (FileSystem::Instance().Exists(module_spec.GetFileSpec()) &&
           FileSystem::Instance().Exists(module_spec.GetSymbolFileSpec())) {
         module_sp = std::make_shared<Module>(module_spec);
+      }
+      if (module_sp) {
+        module_sp->GetSymbolLocatorStatistics().add(
+            object_locator_name, object_duration.get().count());
+        module_sp->GetSymbolLocatorStatistics().add(
+            symbol_locator_name, symbol_duration.get().count());
       }
     }
 

@@ -276,12 +276,24 @@ Status ProcessKDP::DoConnectRemote(llvm::StringRef remote_url) {
               // Lookup UUID locally, before attempting dsymForUUID like action
               FileSpecList search_paths =
                   Target::GetDefaultDebugFileSearchPaths();
-              module_spec.GetSymbolFileSpec() =
-                  PluginManager::LocateExecutableSymbolFile(module_spec,
-                                                            search_paths);
+              StatsDuration symbol_duration;
+              std::string symbol_locator_name;
+              StatsDuration object_duration;
+              std::string object_locator_name;
+              {
+                ElapsedTime elapsed(symbol_duration);
+                module_spec.GetSymbolFileSpec() =
+                    PluginManager::LocateExecutableSymbolFile(
+                        module_spec, search_paths, &symbol_locator_name);
+              }
               if (module_spec.GetSymbolFileSpec()) {
-                ModuleSpec executable_module_spec =
-                    PluginManager::LocateExecutableObjectFile(module_spec);
+                ModuleSpec executable_module_spec;
+                {
+                  ElapsedTime elapsed(object_duration);
+                  executable_module_spec =
+                      PluginManager::LocateExecutableObjectFile(
+                          module_spec, &object_locator_name);
+                }
                 if (FileSystem::Instance().Exists(
                         executable_module_spec.GetFileSpec())) {
                   module_spec.GetFileSpec() =
@@ -297,6 +309,10 @@ Status ProcessKDP::DoConnectRemote(llvm::StringRef remote_url) {
 
               if (FileSystem::Instance().Exists(module_spec.GetFileSpec())) {
                 ModuleSP module_sp(new Module(module_spec));
+                module_sp->GetSymbolLocatorStatistics().add(
+                    object_locator_name, object_duration.get().count());
+                module_sp->GetSymbolLocatorStatistics().add(
+                    symbol_locator_name, symbol_duration.get().count());
                 if (module_sp.get() && module_sp->GetObjectFile()) {
                   // Get the current target executable
                   ModuleSP exe_module_sp(target.GetExecutableModule());

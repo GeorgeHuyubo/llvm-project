@@ -85,8 +85,16 @@ SymbolVendorWasm::CreateInstance(const lldb::ModuleSP &module_sp,
   module_spec.GetSymbolFileSpec() = *symbol_file_spec;
 
   FileSpecList search_paths = Target::GetDefaultDebugFileSearchPaths();
-  FileSpec sym_fspec =
-      PluginManager::LocateExecutableSymbolFile(module_spec, search_paths);
+  StatsDuration locate_duration;
+  std::string locator_name;
+  FileSpec sym_fspec;
+  {
+    ElapsedTime elapsed(locate_duration);
+    sym_fspec = PluginManager::LocateExecutableSymbolFile(
+        module_spec, search_paths, &locator_name);
+  }
+  module_sp->GetSymbolLocatorStatistics().add(locator_name,
+                                              locate_duration.get().count());
   if (!sym_fspec)
     return nullptr;
 

@@ -89,6 +89,7 @@ class Module : public std::enable_shared_from_this<Module>,
                public SymbolContextScope {
 public:
   class LookupInfo;
+  class StatisticsMap;
   // Static functions that can track the lifetime of module objects. This is
   // handy because we might have Module objects that are in shared pointers
   // that aren't in the global module list (from ModuleList). If this is the
@@ -885,6 +886,10 @@ public:
   /// ElapsedTime RAII object.
   StatsDuration &GetSymtabIndexTime() { return m_symtab_index_time; }
 
+  StatisticsMap &GetSymbolLocatorStatistics() {
+    return m_symbol_locator_duration_map;
+  }
+
   void ResetStatistics();
 
   /// \class LookupInfo Module.h "lldb/Core/Module.h"
@@ -954,6 +959,20 @@ public:
     /// If \b true, then demangled names that match will need to contain
     /// "m_name" in order to be considered a match
     bool m_match_name_after_lookup = false;
+  };
+
+  class StatisticsMap {
+  public:
+    void add(const std::string &key, double value) {
+      if (key.empty())
+        return;
+      auto it = map.find(key);
+      if (it == map.end())
+        map.try_emplace(key, value);
+      else
+        it->second += value;
+    }
+    std::unordered_map<std::string, double> map;
   };
 
   /// Get a unique hash for this module.
@@ -1063,6 +1082,8 @@ protected:
   /// an object file and a symbol file which both have symbol tables. The parse
   /// time for the symbol tables can be aggregated here.
   StatsDuration m_symtab_index_time;
+
+  StatisticsMap m_symbol_locator_duration_map;
 
   /// A set of hashes of all warnings and errors, to avoid reporting them
   /// multiple times to the same Debugger.

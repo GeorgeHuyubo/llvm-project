@@ -4250,13 +4250,18 @@ const std::shared_ptr<SymbolFileDWARFDwo> &SymbolFileDWARF::GetDwpSymbolFile() {
     ModuleSpec module_spec;
     module_spec.GetFileSpec() = m_objfile_sp->GetFileSpec();
     FileSpec dwp_filespec;
+    StatsDuration duration;
+    std::string locator_name;
     for (const auto &symfile : symfiles.files()) {
       module_spec.GetSymbolFileSpec() =
           FileSpec(symfile.GetPath() + ".dwp", symfile.GetPathStyle());
       LLDB_LOG(log, "Searching for DWP using: \"{0}\"",
                module_spec.GetSymbolFileSpec());
-      dwp_filespec =
-          PluginManager::LocateExecutableSymbolFile(module_spec, search_paths);
+      {
+        ElapsedTime elapsed(duration);
+        dwp_filespec = PluginManager::LocateExecutableSymbolFile(
+            module_spec, search_paths, &locator_name);
+      }
       if (FileSystem::Instance().Exists(dwp_filespec)) {
         break;
       }
@@ -4267,9 +4272,14 @@ const std::shared_ptr<SymbolFileDWARFDwo> &SymbolFileDWARF::GetDwpSymbolFile() {
       // find the correct DWP file, as the Debuginfod plugin uses *only* this
       // data to correctly match the DWP file with the binary.
       module_spec.GetUUID() = m_objfile_sp->GetUUID();
-      dwp_filespec =
-          PluginManager::LocateExecutableSymbolFile(module_spec, search_paths);
+      {
+        ElapsedTime elapsed(duration);
+        dwp_filespec = PluginManager::LocateExecutableSymbolFile(
+            module_spec, search_paths, &locator_name);
+      }
     }
+    m_objfile_sp->GetModule()->GetSymbolLocatorStatistics().add(
+        locator_name, duration.get().count());
     if (FileSystem::Instance().Exists(dwp_filespec)) {
       LLDB_LOG(log, "Found DWP file: \"{0}\"", dwp_filespec);
       DataBufferSP dwp_file_data_sp;

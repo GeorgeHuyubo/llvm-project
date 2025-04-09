@@ -85,8 +85,16 @@ SymbolVendorPECOFF::CreateInstance(const lldb::ModuleSP &module_sp,
   module_spec.GetSymbolFileSpec() = fspec;
   module_spec.GetUUID() = uuid;
   FileSpecList search_paths = Target::GetDefaultDebugFileSearchPaths();
-  FileSpec dsym_fspec =
-      PluginManager::LocateExecutableSymbolFile(module_spec, search_paths);
+  StatsDuration locate_duration;
+  std::string locator_name;
+  FileSpec dsym_fspec;
+  {
+    ElapsedTime elapsed(locate_duration);
+    dsym_fspec = PluginManager::LocateExecutableSymbolFile(
+        module_spec, search_paths, &locator_name);
+  }
+  module_sp->GetSymbolLocatorStatistics().add(locator_name,
+                                              locate_duration.get().count());
   if (!dsym_fspec)
     return nullptr;
 
