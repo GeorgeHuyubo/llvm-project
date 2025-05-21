@@ -31,7 +31,7 @@ AST_MATCHER_P(QualType, hasAnyType, std::vector<StringRef>, Names) {
     return false;
 
   std::string Name = Node.getLocalUnqualifiedType().getAsString();
-  return llvm::any_of(Names, [&Name](StringRef Ref) { return Ref == Name; });
+  return llvm::is_contained(Names, Name);
 }
 
 AST_MATCHER(FieldDecl, hasIntBitwidth) {
@@ -513,7 +513,9 @@ void NarrowingConversionsCheck::handleFloatingCast(const ASTContext &Context,
       return;
     }
     const BuiltinType *FromType = getBuiltinType(Rhs);
-    if (ToType->getKind() < FromType->getKind())
+    if (!llvm::APFloatBase::isRepresentableBy(
+            Context.getFloatTypeSemantics(FromType->desugar()),
+            Context.getFloatTypeSemantics(ToType->desugar())))
       diagNarrowType(SourceLoc, Lhs, Rhs);
   }
 }

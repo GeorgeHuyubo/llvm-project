@@ -299,6 +299,8 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case Linux: return "linux";
   case Lv2: return "lv2";
   case MacOSX: return "macosx";
+  case Managarm:
+    return "managarm";
   case Mesa3D: return "mesa3d";
   case NVCL: return "nvcl";
   case NaCl: return "nacl";
@@ -384,6 +386,8 @@ StringRef Triple::getEnvironmentTypeName(EnvironmentType Kind) {
     return "pauthtest";
   case LLVM:
     return "llvm";
+  case Mlibc:
+    return "mlibc";
   }
 
   llvm_unreachable("Invalid EnvironmentType!");
@@ -678,6 +682,7 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("linux", Triple::Linux)
     .StartsWith("lv2", Triple::Lv2)
     .StartsWith("macos", Triple::MacOSX)
+    .StartsWith("managarm", Triple::Managarm)
     .StartsWith("netbsd", Triple::NetBSD)
     .StartsWith("openbsd", Triple::OpenBSD)
     .StartsWith("solaris", Triple::Solaris)
@@ -766,6 +771,7 @@ static Triple::EnvironmentType parseEnvironment(StringRef EnvironmentName) {
       .StartsWith("ohos", Triple::OpenHOS)
       .StartsWith("pauthtest", Triple::PAuthTest)
       .StartsWith("llvm", Triple::LLVM)
+      .StartsWith("mlibc", Triple::Mlibc)
       .Default(Triple::UnknownEnvironment);
 }
 
@@ -1128,7 +1134,7 @@ static StringRef getDXILArchNameFromShaderModel(StringRef ShaderModelStr) {
   return Triple::getArchName(Triple::dxil, Triple::DXILSubArch_v1_0);
 }
 
-std::string Triple::normalize(StringRef Str) {
+std::string Triple::normalize(StringRef Str, CanonicalForm Form) {
   bool IsMinGW32 = false;
   bool IsCygwin = false;
 
@@ -1150,7 +1156,8 @@ std::string Triple::normalize(StringRef Str) {
   OSType OS = UnknownOS;
   if (Components.size() > 2) {
     OS = parseOS(Components[2]);
-    IsCygwin = Components[2].starts_with("cygwin");
+    IsCygwin = Components[2].starts_with("cygwin") ||
+               Components[2].starts_with("msys");
     IsMinGW32 = Components[2].starts_with("mingw");
   }
   EnvironmentType Environment = UnknownEnvironment;
@@ -1195,7 +1202,7 @@ std::string Triple::normalize(StringRef Str) {
         break;
       case 2:
         OS = parseOS(Comp);
-        IsCygwin = Comp.starts_with("cygwin");
+        IsCygwin = Comp.starts_with("cygwin") || Comp.starts_with("msys");
         IsMinGW32 = Comp.starts_with("mingw");
         Valid = OS != UnknownOS || IsCygwin || IsMinGW32;
         break;
@@ -1334,6 +1341,19 @@ std::string Triple::normalize(StringRef Str) {
       Components[0] = getDXILArchNameFromShaderModel(Components[2]);
     }
   }
+
+  // Canonicalize the components if necessary.
+  switch (Form) {
+  case CanonicalForm::ANY:
+    break;
+  case CanonicalForm::THREE_IDENT:
+  case CanonicalForm::FOUR_IDENT:
+  case CanonicalForm::FIVE_IDENT: {
+    Components.resize(static_cast<unsigned>(Form), "unknown");
+    break;
+  }
+  }
+
   // Stick the corrected components back together to form the normalized string.
   return join(Components, "-");
 }
@@ -1698,6 +1718,26 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   llvm_unreachable("Invalid architecture value");
 }
 
+unsigned Triple::getTrampolineSize() const {
+  switch (getArch()) {
+  default:
+    break;
+  case Triple::ppc:
+  case Triple::ppcle:
+    if (isOSLinux())
+      return 40;
+    break;
+  case Triple::ppc64:
+  case Triple::ppc64le:
+    if (isOSLinux())
+      return 48;
+    break;
+  case Triple::aarch64:
+    return 36;
+  }
+  return 32;
+}
+
 bool Triple::isArch64Bit() const {
   return getArchPointerBitWidth(getArch()) == 64;
 }
@@ -2024,6 +2064,10 @@ bool Triple::isLittleEndian() const {
 }
 
 bool Triple::isCompatibleWith(const Triple &Other) const {
+  // On MinGW, C code is usually built with a "w64" vendor, while Rust
+  // often uses a "pc" vendor.
+  bool IgnoreVendor = isWindowsGNUEnvironment();
+
   // ARM and Thumb triples are compatible, if subarch, vendor and OS match.
   if ((getArch() == Triple::thumb && Other.getArch() == Triple::arm) ||
       (getArch() == Triple::arm && Other.getArch() == Triple::thumb) ||
@@ -2034,17 +2078,24 @@ bool Triple::isCompatibleWith(const Triple &Other) const {
              getVendor() == Other.getVendor() && getOS() == Other.getOS();
     else
       return getSubArch() == Other.getSubArch() &&
-             getVendor() == Other.getVendor() && getOS() == Other.getOS() &&
+             (getVendor() == Other.getVendor() || IgnoreVendor) &&
+             getOS() == Other.getOS() &&
              getEnvironment() == Other.getEnvironment() &&
              getObjectFormat() == Other.getObjectFormat();
   }
 
-  // If vendor is apple, ignore the version number.
+  // If vendor is apple, ignore the version number (the environment field)
+  // and the object format.
   if (getVendor() == Triple::Apple)
     return getArch() == Other.getArch() && getSubArch() == Other.getSubArch() &&
-           getVendor() == Other.getVendor() && getOS() == Other.getOS();
+           (getVendor() == Other.getVendor() || IgnoreVendor) &&
+           getOS() == Other.getOS();
 
-  return *this == Other;
+  return getArch() == Other.getArch() && getSubArch() == Other.getSubArch() &&
+         (getVendor() == Other.getVendor() || IgnoreVendor) &&
+         getOS() == Other.getOS() &&
+         getEnvironment() == Other.getEnvironment() &&
+         getObjectFormat() == Other.getObjectFormat();
 }
 
 std::string Triple::merge(const Triple &Other) const {
