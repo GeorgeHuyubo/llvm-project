@@ -229,6 +229,10 @@ public:
 
   bool hasPairedLoad(EVT LoadedType, Align &RequiredAlignment) const override;
 
+  bool isProfitableToInterleaveWithGatherScatter() const override {
+    return true;
+  }
+
   unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
 
   bool lowerInterleavedLoad(Instruction *Load, Value *Mask,
@@ -238,6 +242,9 @@ public:
   bool lowerInterleavedStore(Instruction *Store, Value *Mask,
                              ShuffleVectorInst *SVI, unsigned Factor,
                              const APInt &GapMask) const override;
+
+  bool lowerInterleavedStoreWithShuffle(StoreInst *SI, ShuffleVectorInst *SVI,
+                                        unsigned Factor) const;
 
   bool lowerDeinterleaveIntrinsicToLoad(Instruction *Load, Value *Mask,
                                         IntrinsicInst *DI) const override;
@@ -300,8 +307,17 @@ public:
   bool isDesirableToCommuteXorWithShift(const SDNode *N) const override;
 
   /// Return true if it is profitable to fold a pair of shifts into a mask.
-  bool shouldFoldConstantShiftPairToMask(const SDNode *N,
-                                         CombineLevel Level) const override;
+  bool shouldFoldConstantShiftPairToMask(const SDNode *N) const override;
+
+  /// Return true if it is profitable to fold a pair of shifts into a mask.
+  bool shouldFoldMaskToVariableShiftPair(SDValue Y) const override {
+    EVT VT = Y.getValueType();
+
+    if (VT.isVector())
+      return false;
+
+    return VT.getScalarSizeInBits() <= 64;
+  }
 
   bool shouldFoldSelectWithIdentityConstant(unsigned BinOpcode, EVT VT,
                                             unsigned SelectOpcode, SDValue X,
@@ -357,7 +373,6 @@ public:
   Value *getIRStackGuard(IRBuilderBase &IRB) const override;
 
   void insertSSPDeclarations(Module &M) const override;
-  Function *getSSPStackGuardCheck(const Module &M) const override;
 
   /// If the target has a standard location for the unsafe stack pointer,
   /// returns the address of that location. Otherwise, returns nullptr.
@@ -435,7 +450,7 @@ public:
 
   bool shouldConvertFpToSat(unsigned Op, EVT FPVT, EVT VT) const override;
 
-  bool shouldExpandCmpUsingSelects(EVT VT) const override;
+  bool preferSelectsOverBooleanArithmetic(EVT VT) const override;
 
   bool isComplexDeinterleavingSupported() const override;
   bool isComplexDeinterleavingOperationSupported(
@@ -522,9 +537,6 @@ public:
                              bool AllowUnknown = false) const override;
 
   bool shouldExpandGetActiveLaneMask(EVT VT, EVT OpVT) const override;
-
-  bool
-  shouldExpandPartialReductionIntrinsic(const IntrinsicInst *I) const override;
 
   bool shouldExpandCttzElements(EVT VT) const override;
 
@@ -740,12 +752,12 @@ private:
   SDValue LowerVectorOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerXOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOOP_DEPENDENCE_MASK(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBITCAST(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVSCALE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVECREDUCE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerVECREDUCE_MUL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerATOMIC_LOAD_AND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerWindowsDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerInlineDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
